@@ -1,0 +1,32 @@
+{
+    "crime_types": {
+        "scam": "Fraudulent schemes targeting financial gain, e.g., fake investments or lottery wins.",
+        "phishing": "Deceptive emails or sites stealing credentials or personal info.",
+        "harassment": "Repeated unwanted digital contact causing distress.",
+        "hacking": "Unauthorized access to accounts or devices.",
+        "doxxing": "Releasing private info online without consent, often with harm intent.",
+        "other": "Any other cyber incident; ask for details."
+    },
+    "urgency_keywords": [
+        "bank", "money", "transfer", "ongoing", "threatening", "ransom", "house", "immediate", "help now"
+    ],
+    "message_templates": {
+        "greeting": "Hello, this is the Safe Line cybercrime helpline assistant. How can I help you today?",
+        "triage": "Is this an emergency, like an ongoing threat, financial theft in progress, or doxxing with imminent harm?",
+        "consent": "For your report, do you consent to recording this call? Yes/No.",
+        "summary_confirm": "I have: Name {name}, Phone {phone}, Email {email}, Type {type}, Date {date}, Description {desc}. Amount: {amt}. Evidence: {ev}. Correct?",
+        "send_confirm": "I'll send a pre-filled form link via text for verification. Ready?",
+        "end": "Your case number is {id}. Message sent. Reply 'EMERGENCY' if urgent, or call back."
+    },
+    "validation_rules": {
+        "phone": "10 digits for India; normalize to +91 prefix if needed.",
+        "email": "Standard format; confirm spelling if unclear.",
+        "date": "Accept 'today', 'yesterday', or YYYY-MM-DD; normalize to ISO.",
+        "amount_threshold": 1000
+    },
+    "empathy_phrases": [
+        "I'm sorry this happened to you.",
+        "We'll get this documented quickly to help you.",
+        "You're taking the right step by reporting this."
+    ]
+}
