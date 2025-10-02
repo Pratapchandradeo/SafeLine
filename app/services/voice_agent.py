@@ -82,21 +82,39 @@ class DummyTTS:
             chunk_size = bytes_per_ms * chunk_duration_ms
             silent_chunk = b"\x00" * chunk_size
             
-            # Create proper audio frame objects with all expected attributes
-            for _ in range(50):
-                await asyncio.sleep(0)
-                # Create a proper audio frame object
-                audio_frame = type('AudioFrame', (), {})()
-                audio_frame.data = silent_chunk  # The actual audio data
-                audio_frame.sample_rate = self.sample_rate
-                audio_frame.num_channels = self.channels
-                audio_frame.samples_per_channel = len(silent_chunk) // (self.channels * 2)
-                
-                # Add userdata attribute that the framework expects
-                audio_frame.userdata = type('UserData', (), {})()
-                audio_frame.userdata.get = lambda key, default=None: default
-                
-                yield audio_frame
+            # Try different approaches for AudioEvent
+            try:
+                # Approach 1: Try importing from livekit.agents
+                from livekit.agents import AudioFrame
+                for _ in range(50):
+                    await asyncio.sleep(0)
+                    yield AudioFrame(
+                        data=silent_chunk,
+                        sample_rate=self.sample_rate,
+                        num_channels=self.channels,
+                        samples_per_channel=chunk_size // (self.channels * 2)
+                    )
+            except ImportError:
+                try:
+                    # Approach 2: Try the voice.audio import with different name
+                    from livekit.agents.voice import AudioChunk
+                    for _ in range(50):
+                        await asyncio.sleep(0)
+                        yield AudioChunk(
+                            data=silent_chunk,
+                            sample_rate=self.sample_rate,
+                            channels=self.channels
+                        )
+                except ImportError:
+                    # Approach 3: Use the base class approach
+                    for _ in range(50):
+                        await asyncio.sleep(0)
+                        # Create a simple object with the expected attributes
+                        yield type('AudioEvent', (), {
+                            'data': silent_chunk,
+                            'sample_rate': self.sample_rate,
+                            'channels': self.channels
+                        })()
 
     def stream(self, text=None, **kwargs):
         return self._StreamContext(self, text, **kwargs)
