@@ -1,22 +1,23 @@
+# load_context.py
 import json
 from pathlib import Path
 
 def load_context():
-    """Load content from context directory into a single string."""
+    """Load content from context directory - simplified version"""
     context_dir = Path("context")
     context_dir.mkdir(exist_ok=True)
-
-    all_content = ""
-    for file_path in context_dir.glob("*"):
-        if file_path.is_file():
-            try:
-                if file_path.suffix == ".json":
-                    with open(file_path, "r") as f:
-                        content = json.dumps(json.load(f), indent=2)
-                else:
-                    content = file_path.read_text(encoding="utf-8")
-                all_content += f"\n=== {file_path.name} ===\n{content}\n"
-            except Exception:
-                pass
-
-    return all_content.strip() or "No context files found."
+    
+    # Look for JSON files specifically
+    json_files = list(context_dir.glob("*.json"))
+    
+    if not json_files:
+        return "No context files found."
+    
+    # Use the first JSON file found
+    json_file = json_files[0]
+    try:
+        with open(json_file, 'r') as f:
+            content = json.load(f)
+        return json.dumps(content, indent=2)
+    except Exception as e:
+        return f"Error loading {json_file}: {str(e)}"

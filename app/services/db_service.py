@@ -1,6 +1,6 @@
-# app/services/db_service.py (added retrieve_case method)
-import uuid
+# app/services/db_service.py
 import os
+import uuid
 import datetime
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import sessionmaker
@@ -16,22 +16,34 @@ Base = declarative_base()
 class Case(Base):
     __tablename__ = 'cases'
     id = Column(String, primary_key=True)
-    name = Column(String)
-    phone = Column(String)
-    email = Column(String)
-    crime_type = Column(String)
-    incident_date = Column(String)
-    description = Column(Text)
+    name = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    crime_type = Column(String, nullable=True)
+    incident_date = Column(String, nullable=True)
+    description = Column(Text, nullable=True)
     amount_lost = Column(Float, nullable=True)
     evidence = Column(String, nullable=True)
     is_emergency = Column(Boolean, default=False)
     consent_recorded = Column(Boolean, default=False)
-    transcript = Column(Text)
+    transcript = Column(Text, nullable=True)
     created_at = Column(DateTime, default=func.now())
 
-engine = create_engine(os.getenv('POSTGRES_URI', 'postgresql://postgres:Error@localhost:5432/safe_line'))
+db_url = os.getenv("POSTGRES_URI")
+if not db_url:
+    raise RuntimeError("POSTGRES_URI env var not set for this process.")
+print("ℹ️ DBService using POSTGRES_URI:", db_url)
+
+# Create engine with more debugging
+engine = create_engine(db_url, echo=True, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base.metadata.create_all(bind=engine)
+
+# Create tables if they don't exist
+try:
+    Base.metadata.create_all(bind=engine)
+    print("✅ Database tables created/verified")
+except Exception as e:
+    print(f"⚠️ Database table creation failed: {e}")
 
 class DBService:
     @staticmethod
@@ -40,36 +52,44 @@ class DBService:
 
     @staticmethod
     def generate_case_id() -> str:
-        return f"CR-{datetime.datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:4].upper()}"
+        timestamp = datetime.datetime.now().strftime('%Y%m%d')
+        unique_id = str(uuid.uuid4())[:8].upper()
+        return f"CR-{timestamp}-{unique_id}"
 
     @staticmethod
     def create_case(data: Dict[str, Any]) -> Optional[str]:
+        print(f"🔍 DBService.create_case called with data keys: {list(data.keys())}")
+        print(f"🔍 Data content: {data}")
+        
         db = DBService.get_session()
+        case_id = DBService.generate_case_id()
+        
+        # Filter only valid columns and convert empty strings to None
+        valid_cols = {col.name for col in Case.__table__.columns}
+        case_kwargs = {}
+        
+        for k, v in data.items():
+            if k in valid_cols:
+                # Convert empty strings to None for nullable fields
+                if v == "":
+                    case_kwargs[k] = None
+                else:
+                    case_kwargs[k] = v
+
+        print(f"ℹ️ Creating case {case_id} with filtered data: {case_kwargs}")
+        
         try:
-            case_id = DBService.generate_case_id()
-            case_kwargs = {k: v for k, v in data.items() if hasattr(Case, k)}
             case = Case(id=case_id, **case_kwargs)
             db.add(case)
             db.commit()
-            print(f"💾 Saved case: {case_id}")
+            db.refresh(case)
+            print(f"✅ Case saved successfully: {case_id}")
             return case_id
-        except SQLAlchemyError as e:
+        except Exception as e:
+            print(f"❌ Failed to save case: {e}")
+            import traceback
+            traceback.print_exc()
             db.rollback()
-            print(f"DB Error: {e}")
-            return None
-        finally:
-            db.close()
-
-    @staticmethod
-    def retrieve_case(case_id: str) -> Optional[Dict[str, Any]]:
-        db = DBService.get_session()
-        try:
-            result = db.query(Case).filter(Case.id == case_id).first()
-            if result:
-                return {col.name: getattr(result, col.name) for col in result.__table__.columns}
-            return None
-        except SQLAlchemyError as e:
-            print(f"DB Error: {e}")
             return None
         finally:
             db.close()
