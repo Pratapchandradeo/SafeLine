@@ -139,6 +139,13 @@ class SafeLineAgent(Agent):
         self.transcript_file = None
         self._room_name = "unknown"
         self._session_ref = None
+        self._is_speaking = False
+        self._pending_user_input = None
+        self._user_input_buffer = []
+        self._phone_attempts = 0
+        self._email_attempts = 0
+        self._name_attempts = 0  # NEW: Track name attempts
+        self._waiting_for_response = False  # NEW: Track if waiting for user response
         
         print("✅ SafeLineAgent initialized successfully")
 
@@ -157,13 +164,6 @@ class SafeLineAgent(Agent):
         except Exception as e:
             print(f"⚠️ Error loading context: {e}")
             return None
-
-    def _log(self, message: str):
-        """Use both print and logging to ensure visibility"""
-        print(f"🔍 {message}")
-        import logging
-        logger = logging.getLogger("safeline.agent")
-        logger.info(message)
 
     async def _setup_transcript_recording(self, room_name: str):
         """Setup transcript recording file"""
@@ -221,19 +221,34 @@ class SafeLineAgent(Agent):
             print(f"⚠️ Failed to finalize transcript: {e}")
 
     async def _speak(self, text: str):
-        """Speak text to user"""
+        """Speak text to user with interruption protection"""
         try:
             print(f"🗣️ Speaking: {text}")
+            self._is_speaking = True
             await self._add_to_transcript("agent", text, self.current_step)
             if hasattr(self, '_session_ref') and self._session_ref:
                 print(f"🔍 Using session.say to speak: {text}")
                 await self._session_ref.say(text)
             else:
                 print(f"⚠️ No session reference, using direct TTS: {text}")
-                await self.tts.speak(text)
+                if hasattr(self.tts, 'speak'):
+                    await self.tts.speak(text)
         except Exception as e:
             print(f"⚠️ TTS error: {e}")
-            await self.tts.speak(text)
+            if hasattr(self.tts, 'speak'):
+                await self.tts.speak(text)
+        finally:
+            self._is_speaking = False
+            # Set flag to indicate we're now waiting for user response
+            self._waiting_for_response = True
+            print("⏳ Now waiting for user response...")
+            
+            # Process any pending user input that came while speaking
+            if self._pending_user_input:
+                pending_input = self._pending_user_input
+                self._pending_user_input = None
+                print(f"🔄 Processing pending user input: '{pending_input}'")
+                await self._process_user_transcription(pending_input)
 
     def _log_user_response(self, transcription: str, extracted_field: str = None, field_name: str = None):
         """Log detailed user response information"""
@@ -245,10 +260,41 @@ class SafeLineAgent(Agent):
         print(f"📋 Current Case Data: {asdict(self.case_data)}")
         print("📋 ===========================")
 
-    async def on_user_transcription(self, transcription: str):
+    async def setup_event_listeners(self, session):
+        """Setup event listeners for user transcriptions"""
+        print("🎯 Setting up event listeners for user transcriptions")
+        
+        # Listen for user input transcribed events
+        @session.on("user_input_transcribed")
+        def on_user_transcribed(evt):
+            print(f"🎤 user_input_transcribed: '{evt.transcript}' (final: {getattr(evt, 'is_final', False)})")
+            
+            # Process only final transcriptions
+            if getattr(evt, 'is_final', True):
+                asyncio.create_task(self._handle_user_input(evt.transcript))
+
+        print("✅ Event listeners setup complete")
+
+    async def _handle_user_input(self, transcription: str):
+        """Handle user input with interruption protection"""
+        print(f"🎯 _handle_user_input() called with: '{transcription}'")
+        
+        # If agent is speaking, store the input and wait
+        if self._is_speaking:
+            print(f"⏸️ Agent is speaking, storing user input for later: '{transcription}'")
+            self._pending_user_input = transcription
+            return
+        
+        # Otherwise process immediately
+        await self._process_user_transcription(transcription)
+
+    async def _process_user_transcription(self, transcription: str):
         """Process user input based on current step"""
-        print(f"🎯 on_user_transcription() called with: '{transcription}'")
+        print(f"🎯 _process_user_transcription() called with: '{transcription}'")
         print(f"📋 Current step: {self.current_step}")
+        
+        # Reset waiting flag since we're processing a response
+        self._waiting_for_response = False
         
         if not transcription.strip():
             print("⚠️ Empty transcription received, prompting user to repeat")
@@ -268,6 +314,7 @@ class SafeLineAgent(Agent):
                 self._log_user_response(transcription, "emergency detected", "Status")
                 return
 
+            # FIXED: Better step routing with context awareness
             if self.current_step == "greeting":
                 print("➡️ Processing greeting step response")
                 self._log_user_response(transcription)
@@ -283,7 +330,7 @@ class SafeLineAgent(Agent):
                     await self._speak("Thank you for your consent.")
                     await self._ask_name()
                     self._log_user_response(transcription, "True", "Consent")
-                elif any(word in text_clean for word in ['no', 'not', "don't", 'nope']):
+                elif any(word in text_clean for word in ['no', 'not', "don't", 'nope', 'no.']):
                     print("❌ User did not consent")
                     await self._speak("I understand. I'll only collect basic information without recording.")
                     await self._ask_name()
@@ -295,30 +342,71 @@ class SafeLineAgent(Agent):
                 
             elif self.current_step == "name":
                 print("➡️ Processing name step response")
-                name = self._extract_name(transcription)
-                if name:
-                    self.case_data.name = name
-                    print(f"✅ Extracted name: {name}")
-                    await self._speak(f"Thank you {name}.")
-                    await self._ask_phone()
-                    self._log_user_response(transcription, name, "Name")
-                else:
-                    print("❌ Could not extract name")
-                    await self._speak("I didn't catch your name. Could you please tell me your full name?")
+                # FIXED: Better name validation to avoid storing "Yes" as name
+                if transcription.lower().strip() in ['yes', 'no', 'yeah', 'nope', 'ok', 'okay']:
+                    self._name_attempts += 1
+                    print(f"❌ User gave confirmation word instead of name (attempt {self._name_attempts})")
+                    
+                    if self._name_attempts >= 2:
+                        # After 2 attempts, use a default name and move on
+                        self.case_data.name = "User"
+                        print("🔄 Using default name 'User' after multiple failed attempts")
+                        await self._speak("Let's proceed. What is your 10-digit phone number?")
+                        self._name_attempts = 0
+                        await self._ask_phone()
+                    else:
+                        await self._speak("I need your full name to proceed. Could you please tell me your name?")
                     self._log_user_response(transcription)
+                else:
+                    name = self._extract_name(transcription)
+                    if name and len(name) > 1:  # Ensure name has more than 1 character
+                        self.case_data.name = name
+                        print(f"✅ Extracted name: {name}")
+                        await self._speak(f"Thank you {name}.")
+                        self._name_attempts = 0
+                        await self._ask_phone()
+                        self._log_user_response(transcription, name, "Name")
+                    else:
+                        self._name_attempts += 1
+                        print(f"❌ Could not extract valid name (attempt {self._name_attempts})")
+                        
+                        if self._name_attempts >= 2:
+                            # After 2 attempts, use what they said as name
+                            self.case_data.name = transcription.strip()
+                            print(f"🔄 Using provided text as name: {self.case_data.name}")
+                            await self._speak(f"Thank you. What is your 10-digit phone number?")
+                            self._name_attempts = 0
+                            await self._ask_phone()
+                        else:
+                            await self._speak("I didn't catch your name properly. Could you please tell me your full name?")
+                        self._log_user_response(transcription)
                 
             elif self.current_step == "phone":
                 print("➡️ Processing phone step response")
-                phone = self._extract_phone(transcription)
-                if phone:
-                    self.case_data.phone = phone
-                    print(f"✅ Extracted phone: {phone}")
+                
+                # IMPROVED: Better phone collection with buffering
+                phone_result = await self._collect_phone_number(transcription)
+                
+                if phone_result:
+                    self.case_data.phone = phone_result
+                    print(f"✅ Extracted phone: {phone_result}")
                     await self._speak("Thank you.")
+                    self._phone_attempts = 0  # Reset attempts
+                    self._user_input_buffer = []  # Clear buffer
                     await self._ask_email()
-                    self._log_user_response(transcription, phone, "Phone")
+                    self._log_user_response(transcription, phone_result, "Phone")
                 else:
-                    print("❌ Could not extract phone")
-                    await self._speak("I didn't get a valid phone number. Could you please share your 10-digit phone number?")
+                    self._phone_attempts += 1
+                    print(f"❌ Could not extract phone (attempt {self._phone_attempts})")
+                    
+                    # After 3 attempts, offer to skip
+                    if self._phone_attempts >= 3:
+                        await self._speak("Let's skip the phone number for now. What is your email address?")
+                        self.current_step = "email"
+                        self._phone_attempts = 0
+                        self._user_input_buffer = []
+                    else:
+                        await self._speak("I didn't get a complete phone number. Could you please share all 10 digits?")
                     self._log_user_response(transcription)
                 
             elif self.current_step == "email":
@@ -328,11 +416,22 @@ class SafeLineAgent(Agent):
                     self.case_data.email = email
                     print(f"✅ Extracted email: {email}")
                     await self._speak("Thank you.")
+                    self._email_attempts = 0
                     await self._ask_description()
                     self._log_user_response(transcription, email, "Email")
                 else:
-                    print("❌ Could not extract email")
-                    await self._speak("I didn't catch a valid email address. Could you please share your email?")
+                    self._email_attempts += 1
+                    print(f"❌ Could not extract email (attempt {self._email_attempts})")
+                    
+                    # After 2 attempts, move forward with a default email
+                    if self._email_attempts >= 2:
+                        self.case_data.email = f"{self.case_data.name.lower().replace(' ', '')}@safe-line.example"
+                        print(f"🔄 Using default email: {self.case_data.email}")
+                        await self._speak("Let's proceed. Please describe what happened in your own words.")
+                        self._email_attempts = 0
+                        await self._ask_description()
+                    else:
+                        await self._speak("I didn't catch a valid email address. Could you please share your email? You can say something like 'john at gmail dot com'.")
                     self._log_user_response(transcription)
                 
             elif self.current_step == "description":
@@ -379,10 +478,39 @@ class SafeLineAgent(Agent):
                 print(f"❓ Unknown step: {self.current_step}")
                 self._log_user_response(transcription)
         except Exception as e:
-            print(f"⚠️ Error in on_user_transcription: {e}")
+            print(f"⚠️ Error in _process_user_transcription: {e}")
             import traceback
             print(f"Traceback: {traceback.format_exc()}")
             await self._speak("Something went wrong. Please try again.")
+
+    async def _collect_phone_number(self, transcription: str) -> str:
+        """IMPROVED: Better phone number collection with smarter buffering"""
+        print(f"📱 _collect_phone_number() called with: '{transcription}'")
+        
+        # Add current transcription to buffer
+        self._user_input_buffer.append(transcription)
+        
+        # Combine all buffered inputs
+        full_input = " ".join(self._user_input_buffer)
+        print(f"📱 Combined phone input: '{full_input}'")
+        
+        # Try to extract phone from combined input
+        phone = self._extract_phone(full_input)
+        
+        if phone:
+            print(f"✅ Successfully extracted phone: {phone}")
+            return phone
+        
+        # Check if we have enough digits to work with
+        all_digits = re.sub(r'\D', '', full_input)
+        print(f"📱 Current digit count: {len(all_digits)}")
+        
+        # If we have substantial input but no valid phone, clear buffer after 2 attempts
+        if self._phone_attempts >= 2 and len(full_input) > 15:
+            print("📱 Clearing buffer - too much irrelevant input")
+            self._user_input_buffer = []
+        
+        return ""
 
     async def on_enter(self):
         """Start the conversation flow"""
@@ -423,28 +551,32 @@ class SafeLineAgent(Agent):
         await self._speak(consent_msg)
 
     async def _ask_name(self):
+        print("🎯 _ask_name() called")
         self.current_step = "name"
         await self._speak("Could you please tell me your full name?")
 
     async def _ask_phone(self):
         print("🎯 _ask_phone() called")
-        await self._speak("What is your 10-digit phone number?")
-        self.current_step = "phone"
+        # Clear buffer when starting phone collection
+        self._user_input_buffer = []
+        self._phone_attempts = 0
+        self.current_step = "phone"  # IMPORTANT: Set step BEFORE speaking
+        await self._speak("What is your 10-digit phone number? You can say the digits one by one, like 'nine nine three seven'.")
 
     async def _ask_email(self):
         print("🎯 _ask_email() called")
-        await self._speak("What is your email address?")
-        self.current_step = "email"
+        self.current_step = "email"  # IMPORTANT: Set step BEFORE speaking
+        await self._speak("What is your email address? You can say it like 'john at gmail dot com'.")
 
     async def _ask_description(self):
         print("🎯 _ask_description() called")
+        self.current_step = "description"  # IMPORTANT: Set step BEFORE speaking
         await self._speak("Please describe what happened in your own words. Tell me about the incident.")
-        self.current_step = "description"
 
     async def _ask_date(self):
         print("🎯 _ask_date() called")
+        self.current_step = "date"  # IMPORTANT: Set step BEFORE speaking
         await self._speak("When did this incident happen? You can say 'today', 'yesterday', or a specific date.")
-        self.current_step = "date"
 
     async def _classify_crime_type(self, description: str) -> str:
         print("🤖 _classify_crime_type() called")
@@ -473,8 +605,8 @@ class SafeLineAgent(Agent):
         Date: {self.case_data.incident_date or 'Not provided'}
         Is this information correct?
         """
+        self.current_step = "confirmation"  # IMPORTANT: Set step BEFORE speaking
         await self._speak(summary)
-        self.current_step = "confirmation"
 
     async def _save_and_send_form(self):
         try:
@@ -548,44 +680,177 @@ class SafeLineAgent(Agent):
 
     def _extract_name(self, text: str) -> str:
         print(f"🔍 _extract_name() called with: '{text}'")
-        if len(text.strip().split()) <= 3:
-            return text.strip()
+        
+        # FIXED: Better name extraction that avoids confirmation words
+        text = text.strip()
+        
+        # Common confirmation words to ignore
+        confirmation_words = {'yes', 'yeah', 'yep', 'no', 'nope', 'ok', 'okay', 'sure'}
+        if text.lower() in confirmation_words:
+            return ""
+            
+        # Remove common prefixes
         patterns = [
-            r'my name is ([A-Za-z\s]{2,})',
-            r'i am ([A-Za-z\s]{2,})', 
-            r'name is ([A-Za-z\s]{2,})',
-            r'call me ([A-Za-z\s]{2,})',
-            r'this is ([A-Za-z\s]{2,})',
+            r'my name is\s+([A-Za-z\s]{2,})',
+            r'i am\s+([A-Za-z\s]{2,})', 
+            r'name is\s+([A-Za-z\s]{2,})',
+            r'call me\s+([A-Za-z\s]{2,})',
+            r'this is\s+([A-Za-z\s]{2,})',
             r'([A-Z][a-z]+ [A-Z][a-z]+)'
         ]
+        
         for pattern in patterns:
             match = re.search(pattern, text, re.I)
             if match:
                 name = match.group(1).strip()
-                if len(name) > 2:
+                if len(name) > 2 and name.lower() not in confirmation_words:
                     return name
-        return text.strip() if len(text.strip()) > 2 else ""
+        
+        # If no pattern matched but text looks like a name
+        if len(text) > 2 and ' ' in text and text.lower() not in confirmation_words:
+            return text
+        
+        return ""
 
     def _extract_phone(self, text: str) -> str:
         print(f"🔍 _extract_phone() called with: '{text}'")
-        match = re.search(r'(\d{10})', text)
-        if match:
-            return match.group(1)
-        match = re.search(r'(\d{3}[-\.\s]??\d{3}[-\.\s]??\d{4})', text)
-        if match:
-            digits = re.sub(r'\D', '', match.group(1))
-            if len(digits) == 10:
-                return digits
-        digits = re.sub(r'\D', '', text)
-        if len(digits) == 10:
-            return digits
+        
+        # IMPROVED: Much better phone number extraction
+        _num_map = {
+            "zero": "0", "oh": "0", "o": "0", 
+            "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+            "six": "6", "seven": "7", "eight": "8", "nine": "9"
+        }
+
+        def words_to_digits(s: str) -> str:
+            # Convert spoken words to digits with better handling
+            words = re.findall(r'[a-z]+|\d+', s.lower())
+            digits = []
+            
+            i = 0
+            while i < len(words):
+                word = words[i]
+                
+                if word.isdigit():
+                    digits.append(word)
+                    i += 1
+                    continue
+                    
+                # Handle double/triple
+                if word in ["double", "twice"]:
+                    if i + 1 < len(words):
+                        next_word = words[i + 1]
+                        if next_word in _num_map:
+                            digit = _num_map[next_word]
+                            digits.extend([digit, digit])
+                            i += 2
+                            continue
+                    i += 1
+                    continue
+                    
+                if word == "triple":
+                    if i + 1 < len(words):
+                        next_word = words[i + 1]
+                        if next_word in _num_map:
+                            digit = _num_map[next_word]
+                            digits.extend([digit, digit, digit])
+                            i += 2
+                            continue
+                    i += 1
+                    continue
+
+                # Regular number words
+                if word in _num_map:
+                    digits.append(_num_map[word])
+                
+                i += 1
+            
+            return ''.join(digits)
+
+        # Method 1: Direct digit extraction
+        digits_only = re.sub(r'\D', '', text)
+        print(f"📱 Direct digits: '{digits_only}'")
+        if len(digits_only) == 10:
+            return digits_only
+
+        # Method 2: Spoken number conversion
+        spoken_digits = words_to_digits(text)
+        print(f"📱 Spoken digits: '{spoken_digits}'")
+        if len(spoken_digits) == 10:
+            return spoken_digits
+
+        # Method 3: Try to extract from combined spoken patterns
+        # Handle cases like "double nine three seven" -> "9937"
+        combined_input = text.lower()
+        for word, digit in _num_map.items():
+            combined_input = combined_input.replace(word, digit)
+        
+        # Handle double/triple in the combined string
+        combined_input = re.sub(r'double\s*(\d)', r'\1\1', combined_input)
+        combined_input = re.sub(r'triple\s*(\d)', r'\1\1\1', combined_input)
+        combined_input = re.sub(r'twice\s*(\d)', r'\1\1', combined_input)
+        
+        final_digits = re.sub(r'\D', '', combined_input)
+        print(f"📱 Final digits: '{final_digits}'")
+        
+        if len(final_digits) == 10:
+            return final_digits
+        elif len(final_digits) > 10:
+            return final_digits[-10:]  # Take last 10 digits
+
         return ""
 
     def _extract_email(self, text: str) -> str:
         print(f"🔍 _extract_email() called with: '{text}'")
-        text = text.lower().replace(' at ', '@').replace(' dot ', '.').replace(' ', '')
-        match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
-        return match.group(0) if match else ""
+        
+        # Convert common spoken email patterns
+        text_lower = text.lower().strip()
+        
+        # Handle "gmail dot com" patterns
+        if 'gmail' in text_lower or 'email' in text_lower:
+            print("📧 Detected Gmail pattern")
+            
+            # Extract potential username
+            username = "user"  # default fallback
+            
+            # Pattern 1: "john at gmail dot com"
+            if ' at ' in text_lower:
+                parts = text_lower.split(' at ')
+                if len(parts) > 1:
+                    # Get the last word before 'at' as username
+                    before_at = parts[0].strip()
+                    if before_at:
+                        # Take the last word as username
+                        words = before_at.split()
+                        if words:
+                            username = words[-1]
+            
+            # Pattern 2: "gmail dot com" (no username specified)
+            elif text_lower in ['gmail dot com', 'gmail.com', 'gmail', 'email']:
+                username = "user"
+            
+            # Pattern 3: Just a name was said, assume it's the username
+            elif len(text_lower.split()) <= 2 and text_lower not in ['yes', 'no', 'okay']:
+                username = text_lower.replace(' ', '')
+            
+            # Clean the username
+            username = re.sub(r'[^a-z0-9]', '', username)
+            if not username or len(username) < 2:
+                username = "user"
+                
+            email = f"{username}@gmail.com"
+            print(f"📧 Constructed email: {email}")
+            return email
+        
+        # Standard email pattern matching
+        text_clean = text_lower.replace(' at ', '@').replace(' dot ', '.').replace(' ', '')
+        match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text_clean)
+        if match:
+            email = match.group(0)
+            print(f"📧 Found standard email: {email}")
+            return email
+        
+        return ""
 
     def _extract_date(self, text: str) -> str:
         print(f"🔍 _extract_date() called with: '{text}'")
@@ -629,6 +894,9 @@ async def entrypoint(ctx: JobContext):
     print(f"🔍 Starting session for agent in room: {ctx.room.name}")
     await agent._setup_transcript_recording(ctx.room.name)
     
+    # SETUP EVENT LISTENERS
+    await agent.setup_event_listeners(session)
+    
     async def shutdown_callback():
         print("🛑 Shutdown callback called - finalizing transcript")
         await agent._finalize_transcript()
@@ -640,6 +908,19 @@ async def entrypoint(ctx: JobContext):
     try:
         await session.start(room=ctx.room, agent=agent)
         print("✅ Session started successfully")
+        
+        # Add a simple completion wait
+        print("⏳ Waiting for conversation to complete...")
+        for i in range(300):  # 5 minute timeout
+            if agent.case_saved:
+                print("✅ Case saved, completing session")
+                break
+            await asyncio.sleep(1)
+            if i % 30 == 0:  # Print every 30 seconds
+                print(f"⏰ Still waiting... {i} seconds elapsed")
+        
+        print("🎯 Session completed")
+        
     except Exception as e:
         print(f"❌ Failed to start session: {e}")
 
