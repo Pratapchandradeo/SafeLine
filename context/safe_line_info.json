@@ -14,7 +14,7 @@
         "greeting": "Hello, this is the Safe Line cybercrime helpline assistant. How can I help you today?",
         "triage": "This sounds urgent. I'll connect you to a human operator immediately.",
         "consent": "For your report, do you consent to recording this call? Please say yes or no.",
-        "summary_confirm": "I have: Name {name}, Phone {phone}, Email {email}, Crime Type {crime_type}, Date {date}, Description {description}. Is this correct?",
+        "summary_confirm": "I have: Name {name}, and Phone {phone} and, Email {email}, Crime Type {crime_type}, Date {date}, Description {description}. Is this correct?",
         "send_confirm": "I'll send a pre-filled form link via text for verification. Ready?",
         "end": "Your case number is {id}. Message sent. Reply 'EMERGENCY' if urgent, or call back."
     },
