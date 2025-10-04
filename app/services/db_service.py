@@ -93,3 +93,41 @@ class DBService:
             return None
         finally:
             db.close()
+
+    # ADD THIS METHOD TO FIX THE FORM SERVICE ERROR
+    @staticmethod
+    def retrieve_case(case_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a case by ID for the form service"""
+        print(f"🔍 DBService.retrieve_case called for: {case_id}")
+        db = DBService.get_session()
+        try:
+            case = db.query(Case).filter(Case.id == case_id).first()
+            if case:
+                # Convert SQLAlchemy object to dictionary
+                case_dict = {
+                    'id': case.id,
+                    'name': case.name,
+                    'phone': case.phone,
+                    'email': case.email,
+                    'crime_type': case.crime_type,
+                    'incident_date': case.incident_date,
+                    'description': case.description,
+                    'amount_lost': case.amount_lost,
+                    'evidence': case.evidence,
+                    'is_emergency': case.is_emergency,
+                    'consent_recorded': case.consent_recorded,
+                    'transcript': case.transcript,
+                    'created_at': case.created_at.isoformat() if case.created_at else None
+                }
+                print(f"✅ Retrieved case: {case_id}")
+                return case_dict
+            else:
+                print(f"❌ Case not found: {case_id}")
+                return None
+        except Exception as e:
+            print(f"❌ Error retrieving case {case_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+        finally:
+            db.close()

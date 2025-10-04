@@ -10,6 +10,17 @@ class FormService:
         return f"{self.base_url}/f/{case_id}"
 
     def get_case_data_for_form(self, case_id: str) -> dict:
-        db_service = DBService()
-        case = db_service.retrieve_case(case_id)  # Add retrieve_case to DBService if needed
-        return case or {}
+        try:
+            print(f"🔍 FormService.get_case_data_for_form called for: {case_id}")
+            case_data = DBService.retrieve_case(case_id)
+            if case_data:
+                print(f"✅ Found case data for form: {case_id}")
+                return case_data
+            else:
+                print(f"❌ No case data found for: {case_id}")
+                return {}
+        except Exception as e:
+            print(f"❌ Error in get_case_data_for_form: {e}")
+            import traceback
+            traceback.print_exc()
+            return {}

@@ -4,22 +4,85 @@ bp = Blueprint('api', __name__)
 
 FORM_HTML = """
 <!DOCTYPE html>
-<html>
-<head><title>Safe Line Report</title></head>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Safe Line Report</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .form-container {
+            background: #ffffff;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            max-width: 600px;
+            width: 100%;
+        }
+    </style>
+</head>
 <body>
-    <h1>Verify Your Cybercrime Report</h1>
-    <form method="POST" action="/submit">
-        <input type="hidden" name="case_id" value="{{ case_id }}">
-        <label>Name: <input type="text" name="name" value="{{ data.name }}"></label><br>
-        <label>Phone: <input type="tel" name="phone" value="{{ data.phone }}"></label><br>
-        <label>Email: <input type="email" name="email" value="{{ data.email }}"></label><br>
-        <label>Crime Type: <input type="text" name="crime_type" value="{{ data.crime_type }}"></label><br>
-        <label>Date: <input type="date" name="incident_date" value="{{ data.incident_date }}"></label><br>
-        <label>Description: <textarea name="description">{{ data.description }}</textarea></label><br>
-        {% if data.amount_lost %}<label>Amount Lost: <input type="number" name="amount_lost" value="{{ data.amount_lost }}"></label><br>{% endif %}
-        <label>Evidence: <input type="text" name="evidence" value="{{ data.evidence }}"></label><br>
-        <button type="submit">Submit</button>
-    </form>
+    <div class="container-fluid">
+        <div class="container mt-3 mb-3">
+            <h2 class="text-center mb-4">Verify Your Cybercrime Report</h2>
+            <form method="POST" action="/submit">
+                <input type="hidden" name="case_id" value="{{ case_id }}">
+
+                <div class="mb-3">
+                    <label class="form-label">Name</label>
+                    <input type="text" name="name" class="form-control" value="{{ data.name }}" required>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Phone</label>
+                    <input type="tel" name="phone" class="form-control" value="{{ data.phone }}" required>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Email</label>
+                    <input type="email" name="email" class="form-control" value="{{ data.email }}">
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Crime Type</label>
+                    <input type="text" name="crime_type" class="form-control" value="{{ data.crime_type }}">
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Incident Date</label>
+                    <input type="date" name="incident_date" class="form-control" value="{{ data.incident_date }}">
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Description</label>
+                    <textarea name="description" class="form-control" rows="4">{{ data.description }}</textarea>
+                </div>
+
+                {% if data.amount_lost %}
+                <div class="mb-3">
+                    <label class="form-label">Amount Lost</label>
+                    <input type="number" name="amount_lost" class="form-control" value="{{ data.amount_lost }}">
+                </div>
+                {% endif %}
+
+                <div class="mb-3">
+                    <label class="form-label">Evidence</label>
+                    <input type="text" name="evidence" class="form-control" value="{{ data.evidence }}">
+                </div>
+
+                <div class="d-grid">
+                    <button type="submit" class="btn btn-primary btn-lg">Submit</button>
+                </div>
+            </form>
+        </div>
+    </div>
 </body>
 </html>
 """
