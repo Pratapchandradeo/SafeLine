@@ -1,4 +1,3 @@
-# app/services/database.py
 import os
 from sqlalchemy import create_engine, Column, String, DateTime, Boolean, Float, Text, func
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -34,8 +33,6 @@ db_url = os.getenv("POSTGRES_URI")
 if not db_url:
     raise RuntimeError("POSTGRES_URI env var not set.")
 
-print("🔗 Database URL:", db_url)
-
 # Create engine with connection pooling
 engine = create_engine(db_url, echo=True, pool_pre_ping=True, pool_recycle=3600)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -52,9 +49,8 @@ def init_db():
     """Initialize database tables"""
     try:
         Base.metadata.create_all(bind=engine)
-        print("✅ Database tables created/verified")
-    except Exception as e:
-        print(f"⚠️ Database table creation failed: {e}")
+    except Exception:
+        pass
 
 # Initialize database when this module is imported
 init_db()
