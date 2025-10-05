@@ -3,51 +3,15 @@ import os
 import uuid
 import datetime
 from typing import Dict, Any, Optional
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import create_engine, Column, String, DateTime, Boolean, Float, Text, func
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.exc import SQLAlchemyError
-from dotenv import load_dotenv
 
-load_dotenv()
-
-Base = declarative_base()
-
-class Case(Base):
-    __tablename__ = 'cases'
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=True)
-    phone = Column(String, nullable=True)
-    email = Column(String, nullable=True)
-    crime_type = Column(String, nullable=True)
-    incident_date = Column(String, nullable=True)
-    description = Column(Text, nullable=True)
-    amount_lost = Column(Float, nullable=True)
-    evidence = Column(String, nullable=True)
-    is_emergency = Column(Boolean, default=False)
-    consent_recorded = Column(Boolean, default=False)
-    transcript = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=func.now())
-
-db_url = os.getenv("POSTGRES_URI")
-if not db_url:
-    raise RuntimeError("POSTGRES_URI env var not set for this process.")
-print("ℹ️ DBService using POSTGRES_URI:", db_url)
-
-# Create engine with more debugging
-engine = create_engine(db_url, echo=True, pool_pre_ping=True)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Create tables if they don't exist
-try:
-    Base.metadata.create_all(bind=engine)
-    print("✅ Database tables created/verified")
-except Exception as e:
-    print(f"⚠️ Database table creation failed: {e}")
+# Import shared database configuration and Case model
+from app.services.database import SessionLocal, Case, init_db
 
 class DBService:
     @staticmethod
     def get_session():
+        """Get a new database session"""
         return SessionLocal()
 
     @staticmethod
@@ -58,33 +22,34 @@ class DBService:
 
     @staticmethod
     def create_case(data: Dict[str, Any]) -> Optional[str]:
+        """Create a new case in the database"""
         print(f"🔍 DBService.create_case called with data keys: {list(data.keys())}")
-        print(f"🔍 Data content: {data}")
         
         db = DBService.get_session()
         case_id = DBService.generate_case_id()
         
-        # Filter only valid columns and convert empty strings to None
-        valid_cols = {col.name for col in Case.__table__.columns}
-        case_kwargs = {}
-        
-        for k, v in data.items():
-            if k in valid_cols:
-                # Convert empty strings to None for nullable fields
-                if v == "":
-                    case_kwargs[k] = None
-                else:
-                    case_kwargs[k] = v
-
-        print(f"ℹ️ Creating case {case_id} with filtered data: {case_kwargs}")
-        
         try:
+            # Filter only valid columns and convert empty strings to None
+            valid_cols = {col.name for col in Case.__table__.columns}
+            case_kwargs = {}
+            
+            for k, v in data.items():
+                if k in valid_cols:
+                    # Convert empty strings to None for nullable fields
+                    if v == "" or v is None:
+                        case_kwargs[k] = None
+                    else:
+                        case_kwargs[k] = v
+
+            print(f"ℹ️ Creating case {case_id} with filtered data: {case_kwargs}")
+            
             case = Case(id=case_id, **case_kwargs)
             db.add(case)
             db.commit()
             db.refresh(case)
             print(f"✅ Case saved successfully: {case_id}")
             return case_id
+            
         except Exception as e:
             print(f"❌ Failed to save case: {e}")
             import traceback
@@ -94,7 +59,6 @@ class DBService:
         finally:
             db.close()
 
-    # ADD THIS METHOD TO FIX THE FORM SERVICE ERROR
     @staticmethod
     def retrieve_case(case_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a case by ID for the form service"""
@@ -129,5 +93,46 @@ class DBService:
             import traceback
             traceback.print_exc()
             return None
+        finally:
+            db.close()
+
+    @staticmethod
+    def update_case(case_id: str, update_data: Dict[str, Any]) -> bool:
+        """Update an existing case with new data"""
+        print(f"🔍 DBService.update_case called for: {case_id}")
+        print(f"📝 Update data: {update_data}")
+        
+        db = DBService.get_session()
+        
+        try:
+            # Find the case
+            case = db.query(Case).filter(Case.id == case_id).first()
+            if not case:
+                print(f"❌ Case not found for update: {case_id}")
+                return False
+            
+            # Update fields
+            updates_made = 0
+            for key, value in update_data.items():
+                if hasattr(case, key) and value is not None:
+                    current_value = getattr(case, key)
+                    print(f"🔄 Updating {key}: from '{current_value}' to '{value}'")
+                    setattr(case, key, value)
+                    updates_made += 1
+            
+            if updates_made > 0:
+                db.commit()
+                print(f"✅ Case updated successfully: {case_id} ({updates_made} fields updated)")
+                return True
+            else:
+                print(f"⚠️ No updates were made for case: {case_id}")
+                return True  # Return True since no changes needed
+            
+        except Exception as e:
+            print(f"❌ Failed to update case {case_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            db.rollback()
+            return False
         finally:
             db.close()
