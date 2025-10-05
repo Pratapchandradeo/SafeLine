@@ -22,10 +22,8 @@ class SMService:
         test_phone = os.getenv('TEST_PHONE', '')
         if not to_phone or len(to_phone) < 10:
             to_phone = test_phone
-            print(f"ℹ️ Using test phone: {to_phone}")
 
         if not self.client:
-            print(f"[SMS LOG] To {to_phone}: {message}")
             return "logged"
 
         try:
@@ -33,15 +31,13 @@ class SMService:
             response = self.client.sms.send(sms_msg)
 
             # response is a pydantic model in v4 — convert to dict
-            data = response.model_dump()  # dict form
+            data = response.model_dump()
             # older-style message id access:
             msg_id = None
             messages = data.get("messages") or []
             if messages and isinstance(messages, list):
                 msg_id = messages[0].get("message-id") or messages[0].get("messageId")
 
-            print(f"📱 SMS sent: {data}")
             return msg_id
-        except Exception as e:
-            print(f"SMS Error: {e}")
+        except Exception:
             return None
