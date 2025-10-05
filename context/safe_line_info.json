@@ -12,21 +12,65 @@
     ],
     "message_templates": {
         "greeting": "Hello, this is the Safe Line cybercrime helpline assistant. How can I help you today?",
-        "triage": "This sounds urgent. I'll connect you to a human operator immediately.",
         "consent": "For your report, do you consent to recording this call? Please say yes or no.",
-        "summary_confirm": "I have: Name {name}, and Phone {phone} and, Email {email}, Crime Type {crime_type}, Date {date}, Description {description}. Is this correct?",
-        "send_confirm": "I'll send a pre-filled form link via text for verification. Ready?",
-        "end": "Your case number is {id}. Message sent. Reply 'EMERGENCY' if urgent, or call back."
+        "name_request": "What is your full name?",
+        "name_acknowledge": "Thank you {name}.",
+        "emergency_check": "Before we continue, is this an ongoing threat or emergency situation?",
+        "emergency_clarify": "I need to know if this is an ongoing emergency. Please say 'yes' if this is an immediate threat, or 'no' if it's not.",
+        "emergency_timeout": "I'll assume this is not an emergency. Let's continue with your email.",
+        "no_emergency": "Thank you for confirming. Let's continue.",
+        "email_request": "What is your email address?",
+        "email_skip": "No problem. Let's continue.",
+        "description_request": "Please describe what happened in your own words.",
+        "description_continue": "Please continue describing what happened.",
+        "date_request": "When did this happen? You can say 'today', 'yesterday', or a specific date.",
+        "date_retry": "I didn't catch a clear date. When did this happen? You can say 'today', 'yesterday', or a specific date.",
+        "summary_confirm": "Let me confirm your details:\nName: {name}\nContact Number: {phone} (from your call)\nEmail: {email}\nIncident: {crime_type}\nDate: {date}\n\nIs this information correct?",
+        "confirmation_clarify": "Please say 'yes' if the information is correct, or 'no' if you need to make changes.",
+        "completion": "Thank you for reporting. I've saved your case with number {case_id}. You'll receive an SMS with your case details and a link to update any information. Thank you for calling Safe Line. Goodbye.",
+        "emergency_handling": "Okay. If this is an ongoing emergency, please call 1-800-HELP-NOW immediately for urgent assistance. This call will now end. Thank you for reaching out.",
+        "timeout_prompt": "Are you still there? Please respond to continue.",
+        "error_recovery": "I encountered an issue. Let me ask that again."
     },
     "validation_rules": {
         "phone": "10 digits for India; normalize to +91 prefix if needed.",
-        "email": "Standard format; confirm spelling if unclear.",
+        "email": "Standard format;",
         "date": "Accept 'today', 'yesterday', or YYYY-MM-DD; normalize to ISO.",
-        "amount_threshold": 1000
+        "amount_threshold": 1000,
+        "max_attempts_per_field": 2,
+        "timeout_seconds": 25
     },
     "empathy_phrases": [
         "I'm sorry this happened to you.",
         "We'll get this documented quickly to help you.",
-        "You're taking the right step by reporting this."
+        "You're taking the right step by reporting this.",
+        "I understand this must be difficult.",
+        "Thank you for sharing this with me."
+    ],
+    "conversation_flow": [
+        "greeting",
+        "consent", 
+        "name",
+        "emergency_check",
+        "email",
+        "description",
+        "date",
+        "confirmation",
+        "completion"
+    ],
+    "email_patterns": [
+        "{username} at {provider} dot {tld}",
+        "{username} {provider} dot {tld}",
+        "my email is {username} at {provider} dot {tld}",
+        "{provider} dot {tld}"
+    ],
+    "date_patterns": [
+        "today",
+        "yesterday", 
+        "day before yesterday",
+        "last week",
+        "MM/DD/YYYY",
+        "YYYY-MM-DD",
+        "Month DD, YYYY"
     ]
 }
